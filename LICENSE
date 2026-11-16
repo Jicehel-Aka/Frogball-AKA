@@ -1,0 +1,7 @@
+Frogball (code, rendu, sons synthetises) — (c) jeancharleslebeau
+
+Licence : Creative Commons Attribution - Pas d'Utilisation Commerciale 4.0 International (CC BY-NC 4.0)
+Texte complet : https://creativecommons.org/licenses/by-nc/4.0/legalcode
+
+Les composants components/gamebuino et components/aka_runtime viennent de l'ecosysteme Gamebuino AKA
+et gardent leurs licences d'origine. Les sprites (assets/sprites_sheet.png) ont ete fournis par l'auteur du projet.

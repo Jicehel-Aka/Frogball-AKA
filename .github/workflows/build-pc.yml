@@ -1,0 +1,127 @@
+name: Build PC (Windows / Linux)
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Joindre les builds PC à une Release GitHub'
+        required: false
+        default: false
+        type: boolean
+      release_tag:
+        description: 'Tag de la Release (ex. v1.0.0). Vide = v1.0.<n° d exécution>'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: PC Linux (SDL2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dépendances
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ libsdl2-dev
+      - name: Compiler
+        run: |
+          cmake -S pc -B build-pc -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-pc -j
+      - name: Fumée (démarre 3 s sans écran ni son)
+        run: |
+          set +e
+          SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy timeout 3 build-pc/frogball
+          rc=$?
+          test $rc -eq 124 || { echo "le jeu s'est arrêté avec le code $rc"; exit 1; }
+      - name: Paquet
+        run: |
+          mkdir -p out/Frogball-linux
+          cp build-pc/frogball out/Frogball-linux/
+          cp README.md LICENSE out/Frogball-linux/
+          cat > out/Frogball-linux/LISEZMOI.txt <<'TXT'
+          FROGBALL (PC Linux) — necessite SDL2 :  sudo apt install libsdl2-2.0-0
+          Lancer :  ./frogball
+          Touches : A/Z ou Gauche = flipper gauche, D/S ou Droite = flipper droit,
+                    Bas/Espace = ressort (maintenir puis relacher), Haut/B = secousse,
+                    P = pause, F11 = plein ecran, Echap = quitter. Manette SDL prise en charge.
+          TXT
+          chmod +x out/Frogball-linux/frogball
+          tar -czf out/Frogball-PC-Linux-x86_64.tar.gz -C out Frogball-linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frogball-PC-Linux
+          path: out/Frogball-PC-Linux-x86_64.tar.gz
+          if-no-files-found: error
+          retention-days: 90
+
+  windows:
+    name: PC Windows (MSYS2 / SDL2)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-SDL2
+            zip
+      - name: Compiler
+        run: |
+          cmake -S pc -B build-pc -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-pc
+      - name: Paquet (exe + SDL2.dll)
+        run: |
+          mkdir -p out/Frogball-windows
+          cp build-pc/frogball.exe out/Frogball-windows/Frogball.exe
+          cp /mingw64/bin/SDL2.dll out/Frogball-windows/
+          cp README.md LICENSE out/Frogball-windows/
+          cat > out/Frogball-windows/LISEZMOI.txt <<'TXT'
+          FROGBALL (PC Windows) — lancer Frogball.exe
+          Touches : A/Z ou Gauche = flipper gauche, D/S ou Droite = flipper droit,
+                    Bas/Espace = ressort (maintenir puis relacher), Haut/B = secousse,
+                    P = pause, F11 = plein ecran, Echap = quitter. Manette prise en charge.
+          TXT
+          (cd out && zip -r Frogball-PC-Windows-x64.zip Frogball-windows)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frogball-PC-Windows
+          path: out/Frogball-PC-Windows-x64.zip
+          if-no-files-found: error
+          retention-days: 90
+
+  release:
+    name: Publier les builds PC
+    needs: [linux, windows]
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Frogball-PC-*
+          merge-multiple: true
+          path: release
+      - name: Tag
+        id: tag
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then T="${GITHUB_REF_NAME}"
+          elif [ -n "${{ inputs.release_tag }}" ]; then T="${{ inputs.release_tag }}"
+          else T="v1.0.${{ github.run_number }}"; fi
+          echo "name=$T" >> "$GITHUB_OUTPUT"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: Frogball ${{ steps.tag.outputs.name }}
+          files: release/*

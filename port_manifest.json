@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "frogball",
+  "title": "Frogball",
+  "version": "1.0.0",
+  "platform": "Gamebuino AKA",
+  "port_level": "native",
+  "author": "jeancharleslebeau",
+  "license": "CC BY-NC 4.0",
+  "description": "Retro frog pinball: scrolling 240x520 table, bumper frogs, lily pads, F-R-O-G lanes, duck boss with levels, 9 trophies, top 5 and synthesized sound.",
+  "supports_save": true,
+  "supports_screenshot": true,
+  "supports_languages": true,
+  "supports_pause": true,
+  "save_directory": "/sdcard/frogball/"
+}
