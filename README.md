@@ -4,17 +4,18 @@ Flipper rétro « fantasy » écrit de zéro pour la console **Gamebuino AKA** (
 Inspiré d'un flipper style Game Boy des années 90 avec des grenouilles ; le code, la physique, le rendu et
 les sons sont originaux.
 
-**Tourner la console de 90° vers la droite** (comme AKA Pinball) : la table est en portrait 240×520 et défile
-verticalement derrière une fenêtre de 240×280, avec un HUD de 40 px.
+**Tourner la console de 90° vers la droite** (comme AKA Pinball) : chaque table tient sur UN SEUL écran
+(portrait 240×296, sans défilement), le bandeau score / multiplicateur / bille est sous la table, et le rendu
+reprend la palette « Game Boy » (3 verts + orange) observée dans la vidéo de référence.
 
 ## Le jeu
-- 1 bille, 3 vies (icônes grenouille), protection de bille de 15 s (une fois par bille), tilt.
-- 3 bumpers (grenouilles qui ouvrent la bouche, champignon), 2 slingshots, 4 nénuphars à allumer
-  (les 4 allumés : 5 000 pts + **canard étourdi** 12 s, double dégâts), 4 couloirs **F-R-O-G**
-  (les flippers font tourner les lampes ; les 4 allumés : multiplicateur +1, jusqu'à ×5),
-  spinner « mouches » (10 mouches = 5 000 pts + 8 s de protection).
-- **Boss canard** qui patrouille en haut de la mare : points de vie croissants (3, 5, 7… 15), score
-  10 000 × niveau à chaque victoire, il revient plus fort.
+- **Deux tables reliées** : la **mare** (3 bumpers, grenouille centrale, 4 nénuphars, spinner « mouches »)
+  puis la table du **canard** (6 œufs à ramasser, canard qui patrouille). Allumer les 4 nénuphars envoie la bille
+  sur la table du canard (écran de transition à bulles) ; vaincre le canard ramène à la mare, canard plus fort.
+- 3 billes (« BALL n »), protection de bille de 15 s (une fois par bille), tilt, multiplicateur ×1 à ×5
+  (les 4 couloirs **F-R-O-G** allumés : +1 ; les flippers font tourner les lampes).
+- **Boss canard** : points de vie 3, 5, 7… 15 ; les 6 œufs ramassés l'étourdissent 12 s (double dégâts) ;
+  10 000 × niveau à chaque victoire.
 - **9 trophées** et **top 5** sauvegardés sur la carte SD (`/sdcard/frogball/save.bin`).
 
 ## Contrôles
@@ -30,7 +31,7 @@ verticalement derrière une fenêtre de 240×280, avec un HUD de 40 px.
 ```
 main/game/      frogball_core.*  coeur portable (physique 360 Hz, règles, boss, trophées)
                 frog_sound.*     effets et musique synthétisés (aucun échantillon)
-main/ui/        render.*         rendu tourné à 90°, sprites en colonnes (un blit par course de pixels)
+main/ui/        render.*         rendu tourné à 90°, palette Game Boy (toute couleur est ramenée à 5 teintes)
                 sprites.*        GÉNÉRÉ par tools/gen_sprites.py depuis assets/sprites_sheet.png
 main/platform/  couche console : entrées, audio (gb_audio_player), SD, backend graphique
 test/host/      test PC (g++) : physique + rendu + sons, captures PPM — sans ESP-IDF
@@ -63,3 +64,9 @@ P = pause · F11 = plein écran · Échap = quitter. Manette SDL prise en charge
 
 ## Licence
 CC BY-NC 4.0 (voir `LICENSE`).
+
+## Ce qui est observé / ce qui est inventé
+Observé dans la vidéo « Frogball (2026) » : style Game Boy, tables à écran unique, table mare et table canard
+avec œufs, HUD « score · ×N · BALL n », menu, transition à bulles (voir `docs/OBSERVATIONS_VIDEO.md`).
+Inventés ici (le jeu d'origine n'a pas été joué) : les règles exactes, la progression mare ↔ canard, les trophées,
+la musique et les sons (synthétisés, composition originale). Les sprites viennent de planches fournies par l'auteur.

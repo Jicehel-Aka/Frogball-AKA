@@ -37,10 +37,10 @@ static void shot(const char* name, const Game& g) {
 static Input bot(const Game& g, float t) {
     Input in;
     const Ball& b = g.ball;
-    if (b.active && b.inShooter && b.y > 470) in.plunger = fmodf(t, 2.0f) < 1.0f;
-    if (b.active && !b.inShooter && b.y > 400) {
+    if (b.active && b.inShooter && b.y > LANE_REST_Y - 20.0f) in.plunger = fmodf(t, 2.0f) < 1.0f;
+    if (b.active && !b.inShooter && b.y > 215) {
         const bool left = b.x < 113;
-        if (fabsf(b.x - (left ? 100.0f : 126.0f)) < 30.0f && b.y > 430) { if (left) in.left = true; else in.right = true; }
+        if (fabsf(b.x - (left ? 100.0f : 126.0f)) < 30.0f && b.y > 235) { if (left) in.left = true; else in.right = true; }
     }
     return in;
 }
@@ -88,7 +88,7 @@ int main(int argc, char** argv) {
     Game h; h.begin(st);
     press(h, &Input::plunger);
     float tt = 0.0f;
-    for (int f = 0; f < 60 * 300 && h.state == State::Playing; f++) { Input in; const Ball& b = h.ball; if (b.active && b.inShooter && b.y > 470) in.plunger = fmodf(tt, 2.0f) < 0.6f; tick(h, in); tt += 1.0f / 60.0f; }
+    for (int f = 0; f < 60 * 300 && h.state == State::Playing; f++) { Input in; const Ball& b = h.ball; if (b.active && b.inShooter && b.y > LANE_REST_Y - 20.0f) in.plunger = fmodf(tt, 2.0f) < 0.6f; tick(h, in); tt += 1.0f / 60.0f; }
     CHECK(h.state == State::GameOver, "3 billes perdues -> GAME OVER (state=%d, balls=%d)", (int)h.state, h.ballsLeft);
     shot("06_gameover", h);
     for (int i = 0; i < 100; i++) tick(h, Input());
@@ -104,21 +104,42 @@ int main(int argc, char** argv) {
     CHECK(h.save.top[0].score == 99999 && h.save.top[0].tri[0] == 'B' && h.save.top[0].tri[1] == 'C' && h.save.top[0].tri[2] == 'A', "record insere: %u %s", (unsigned)h.save.top[0].score, h.save.top[0].tri);
     CHECK(g_saves > 0, "la sauvegarde a ete ecrite");
 
-    printf("[4] succes et boss\n");
+    printf("[4] tables, succes et boss\n");
     g_diskValid = false;
     Game k; k.begin(st);
     press(k, &Input::plunger);
+    CHECK(k.table == TABLE_POND && k.bumperCount == 3 && k.padCount == 4, "la partie commence sur la mare");
+    shot("08_pond", k);
     k.unlock(ACH_DUCK_DOWN);
     CHECK(k.hasAch(ACH_DUCK_DOWN) && k.achPopup == ACH_DUCK_DOWN, "succes debloque");
-    shot("08_achievement", k);
+    // les 4 nenuphars de la mare -> ecran de transition -> table du canard
+    k.ball.active = true; k.ball.inShooter = false; k.ball.vx = 0; k.ball.vy = 0;
+    for (int i = 0; i < 4; i++) {
+        k.ball.x = k.pads[i].x; k.ball.y = k.pads[i].y - 14.0f; k.ball.vy = 200.0f;
+        for (int f = 0; f < 30 && k.travelT <= 0.0f && !((k.padLit >> i) & 1); f++) tick(k, Input());
+        if (k.travelT > 0.0f) break;
+    }
+    CHECK(k.travelT > 0.0f && k.travelTo == TABLE_DUCK, "4 nenuphars -> transition vers le canard (travelT=%.2f)", k.travelT);
+    shot("09_travel", k);
+    for (int i = 0; i < 60 * 3 && k.table != TABLE_DUCK; i++) tick(k, Input());
+    CHECK(k.table == TABLE_DUCK && k.bumperCount == 0 && k.padCount == 6 && k.ball.active, "table du canard en place (table=%d)", k.table);
+    for (int i = 0; i < 20; i++) tick(k, Input());
+    shot("10_duck_table", k);
+    // les 6 oeufs -> le canard est etourdi
+    k.ball.inShooter = false;
+    for (int i = 0; i < 6; i++) {
+        k.ball.x = k.pads[i].x; k.ball.y = k.pads[i].y - 14.0f; k.ball.vx = 0; k.ball.vy = 200.0f;
+        for (int f = 0; f < 30 && !((k.padLit >> i) & 1) && k.padReset <= 0.0f; f++) tick(k, Input());
+    }
+    CHECK(k.duck.stun > 0.0f, "6 oeufs -> canard etourdi");
     k.duck.hp = 1; k.duck.stun = 0.0f;
     k.ball.x = k.duck.x; k.ball.y = k.duck.y + 18.0f; k.ball.vx = 0; k.ball.vy = -300.0f; k.ball.inShooter = false;
     for (int i = 0; i < 60 && k.duck.st == DuckState::Patrol; i++) tick(k, Input());
     CHECK(k.duck.st == DuckState::Dying, "le canard est vaincu (hp=%d)", k.duck.hp);
     CHECK(k.hasAch(ACH_DUCK_DOWN), "succes DUCK DOWN");
-    shot("09_duck_dying", k);
-    for (int i = 0; i < 60 * 6; i++) tick(k, Input());
-    CHECK(k.duck.st == DuckState::Patrol && k.duck.level == 2 && k.duck.hp == 5, "canard niveau 2 (lvl=%d hp=%d)", k.duck.level, k.duck.hp);
+    shot("11_duck_dying", k);
+    for (int i = 0; i < 60 * 8; i++) tick(k, Input());
+    CHECK(k.table == TABLE_POND && k.duck.level == 2 && k.duck.hp == 5, "retour a la mare, canard niveau 2 (table=%d lvl=%d hp=%d)", k.table, k.duck.level, k.duck.hp);
 
     printf("[5] sons et musique\n");
     for (int i = 1; i < (int)Sfx::Count; i++) {

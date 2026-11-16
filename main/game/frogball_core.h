@@ -23,11 +23,11 @@ namespace frog {
 // --- Ecran (vue portrait : la console est tournee a 90 degres) ------------------
 constexpr int   SCREEN_W = 240;
 constexpr int   SCREEN_H = 320;
-constexpr int   HUD_H    = 40;
-constexpr int   VIEW_H   = SCREEN_H - HUD_H;       // 280
+constexpr int   HUD_H    = 24;                      // bandeau score / multiplicateur / bille, SOUS la table
+constexpr int   VIEW_H   = SCREEN_H - HUD_H;       // 296 : la table tient sur UN SEUL ecran (pas de defilement)
 constexpr int   WORLD_W  = 240;
-constexpr int   WORLD_H  = 520;
-constexpr float MAX_CAM_Y = (float)(WORLD_H - VIEW_H);
+constexpr int   WORLD_H  = VIEW_H;
+constexpr float MAX_CAM_Y = 0.0f;
 
 // --- Physique -------------------------------------------------------------------
 constexpr float BALL_R       = 5.0f;
@@ -39,12 +39,14 @@ constexpr float MAX_SPEED    = 1100.0f;
 
 // --- Plateau --------------------------------------------------------------------
 constexpr int   MAX_WALLS    = 48;
-constexpr int   BUMPER_COUNT = 3;
-constexpr int   PAD_COUNT    = 4;
+constexpr int   BUMPER_COUNT = 3;                  // capacite (la table du canard n'en a pas)
+constexpr int   PAD_COUNT    = 8;                  // capacite : 4 nenuphars (mare) ou 6 oeufs (canard)
+constexpr int   TABLE_POND   = 0;                  // table 1 : la mare (bumpers, grenouille, nenuphars)
+constexpr int   TABLE_DUCK   = 1;                  // table 2 : le canard et ses oeufs
 constexpr int   LANE_COUNT   = 4;                  // F R O G
 constexpr float LANE_X       = 225.0f;             // axe du couloir de lancement
-constexpr float LANE_REST_Y  = 490.0f;             // bille au repos sur le ressort
-constexpr float DRAIN_Y      = 528.0f;
+constexpr float LANE_REST_Y  = 268.0f;             // bille au repos sur le ressort
+constexpr float DRAIN_Y      = 304.0f;
 
 constexpr int   TOP_N        = 5;
 constexpr float BALL_SAVE_SEC = 15.0f;
@@ -79,7 +81,7 @@ struct Circle { float x, y, r; };
 enum class DuckState : uint8_t { Patrol, Dying, Away };
 struct Duck {
     DuckState st = DuckState::Patrol;
-    float x = 120, y = 108;
+    float x = 120, y = 70;
     float t = 0.0f;         // horloge de patrouille
     int   hp = 3, maxHp = 3, level = 1;
     float flash = 0.0f, cool = 0.0f, timer = 0.0f, stun = 0.0f;
@@ -148,6 +150,10 @@ public:
     Flipper fl[2];
     Seg     walls[MAX_WALLS];
     int     wallCount = 0;
+    int     table = TABLE_POND;        // table en cours
+    int     bumperCount = 0, padCount = 0;
+    float   travelT = 0.0f;            // > 0 : ecran de transition (bulles) vers travelTo
+    int     travelTo = TABLE_POND;
     Circle  bumpers[BUMPER_COUNT];
     float   bumperFlash[BUMPER_COUNT] = {};
     Circle  pads[PAD_COUNT];
@@ -174,7 +180,6 @@ public:
     float respawnDelay = 0.0f;
     uint32_t bumperHits = 0;
 
-    float cameraY = MAX_CAM_Y;
     float animT = 0.0f;                // horloge d'animation (decor)
     char  banner[28] = "";
     float bannerTimer = 0.0f;
@@ -189,6 +194,8 @@ public:
     uint32_t nowMs = 0;
 
     // Tests : pilotage direct de la physique
+    void buildTable(int which);        // monte la table (mare ou canard)
+    void travel(int to);               // ecran de transition vers l'autre table
     void startNewGame();
     void stepPhysics(float dt, const Input& in);
     int  rankOf(uint32_t sc) const;
@@ -209,11 +216,9 @@ private:
     void emit(Sfx id, uint8_t arg = 0);
     void say(const char* txt, float sec);
     float frand();
-    void buildTable();
     void spawnBall();
     void substep(float dt, bool leftHeld, bool rightHeld);
     void updatePlaying(float dt, const Input& in, bool leftEdge, bool rightEdge, bool nudgeEdge);
-    void updateCamera(float dt);
     void updateDuck(float dt);
     void onDrain();
     void endGame();

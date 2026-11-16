@@ -29,7 +29,7 @@ Game::Game() {
         save.top[i].score = sc[i];
         memcpy(save.top[i].tri, tri[i], 4);
     }
-    buildTable();
+    buildTable(TABLE_POND);
 }
 
 void Game::begin(const SaveStore& store) {
@@ -75,7 +75,8 @@ void Game::unlock(int i) {
 // ----------------------------------------------------------------------------
 // Plateau
 // ----------------------------------------------------------------------------
-void Game::buildTable() {
+void Game::buildTable(int which) {
+    table = which;
     wallCount = 0;
     auto W = [&](float x1, float y1, float x2, float y2, float e = 0.5f, uint8_t kind = 0) {
         if (wallCount < MAX_WALLS) walls[wallCount++] = {x1, y1, x2, y2, e, kind};
@@ -90,30 +91,54 @@ void Game::buildTable() {
             px = x; py = y;
         }
     }
-    W(12, 118, 12, 392);                 // mur gauche
-    W(214, 130, 214, 496);               // separation plateau / couloir de lancement
+    W(12, 118, 12, 226);                 // mur gauche
+    W(214, 130, 214, 276);               // separation plateau / couloir de lancement
     W(214, 130, 204, 120);               // deflecteur : la bille qui retombe ne rentre pas dans le couloir
-    W(236, 118, 236, 496);               // paroi exterieure du couloir
-    W(214, 496, 236, 496, 0.1f);         // plancher du couloir
-    W(12, 392, 62, 450);                 // guide gauche
-    W(214, 392, 164, 450);               // guide droit
+    W(236, 118, 236, 276);               // paroi exterieure du couloir
+    W(214, 276, 236, 276, 0.1f);         // plancher du couloir
+    W(12, 226, 62, 262);                 // guide gauche
+    W(214, 226, 164, 262);               // guide droit
     // slingshots (la face inclinee donne l'impulsion)
-    W(36, 330, 70, 408, 0.5f, 1);  W(36, 330, 36, 376, 0.5f, 3);  W(36, 376, 70, 408, 0.5f, 3);
-    W(190, 330, 156, 408, 0.5f, 2); W(190, 330, 190, 376, 0.5f, 3); W(190, 376, 156, 408, 0.5f, 3);
+    W(36, 202, 70, 248, 0.5f, 1);  W(36, 202, 36, 226, 0.5f, 3);  W(36, 226, 70, 248, 0.5f, 3);
+    W(190, 202, 156, 248, 0.5f, 2); W(190, 202, 190, 226, 0.5f, 3); W(190, 226, 156, 248, 0.5f, 3);
 
     // Flippers
-    fl[0] = {true,  68.0f, 456.0f, 42.0f, 42.0f * DEG, -22.0f * DEG, 42.0f * DEG, 42.0f * DEG, 0.0f};
-    fl[1] = {false, 158.0f, 456.0f, 42.0f, 42.0f * DEG, -22.0f * DEG, 42.0f * DEG, 42.0f * DEG, 0.0f};
+    fl[0] = {true,  68.0f, 266.0f, 42.0f, 42.0f * DEG, -22.0f * DEG, 42.0f * DEG, 42.0f * DEG, 0.0f};
+    fl[1] = {false, 158.0f, 266.0f, 42.0f, 42.0f * DEG, -22.0f * DEG, 42.0f * DEG, 42.0f * DEG, 0.0f};
 
-    bumpers[0] = {83.0f, 178.0f, 17.0f};
-    bumpers[1] = {143.0f, 178.0f, 17.0f};
-    bumpers[2] = {113.0f, 230.0f, 17.0f};
-    pads[0] = {46.0f, 292.0f, 9.0f};
-    pads[1] = {86.0f, 306.0f, 9.0f};
-    pads[2] = {140.0f, 306.0f, 9.0f};
-    pads[3] = {180.0f, 292.0f, 9.0f};
-    for (int i = 0; i < LANE_COUNT; i++) lanes[i] = {65.0f + 32.0f * (float)i, 66.0f};
-    spinner = {30.0f, 238.0f, 10.0f};
+    for (int i = 0; i < LANE_COUNT; i++) lanes[i] = {65.0f + 32.0f * (float)i, 34.0f};
+    padLit = 0; padReset = 0.0f; laneLit = 0;
+    if (which == TABLE_POND) {
+        // la mare : 3 bumpers, la grenouille centrale (4 nenuphars autour), le spinner a mouches
+        bumperCount = 3;
+        bumpers[0] = {84.0f, 92.0f, 15.0f};
+        bumpers[1] = {144.0f, 92.0f, 15.0f};
+        bumpers[2] = {114.0f, 134.0f, 15.0f};
+        padCount = 4;
+        pads[0] = {50.0f, 174.0f, 8.0f};
+        pads[1] = {88.0f, 188.0f, 8.0f};
+        pads[2] = {140.0f, 188.0f, 8.0f};
+        pads[3] = {178.0f, 174.0f, 8.0f};
+        spinner = {30.0f, 150.0f, 10.0f};
+    } else {
+        // le canard : pas de bumper, 6 oeufs a ramasser (3 a gauche, 3 a droite), le canard patrouille en haut
+        bumperCount = 0;
+        padCount = 6;
+        pads[0] = {52.0f, 120.0f, 7.0f};
+        pads[1] = {72.0f, 146.0f, 7.0f};
+        pads[2] = {50.0f, 172.0f, 7.0f};
+        pads[3] = {178.0f, 120.0f, 7.0f};
+        pads[4] = {158.0f, 146.0f, 7.0f};
+        pads[5] = {180.0f, 172.0f, 7.0f};
+        spinner = {114.0f, 190.0f, 10.0f};
+    }
+}
+
+void Game::travel(int to) {
+    travelTo = to;
+    travelT = 1.6f;
+    ball.active = false;
+    respawnDelay = 0.0f;
 }
 
 // ----------------------------------------------------------------------------
@@ -238,9 +263,9 @@ void Game::substep(float dt, bool leftHeld, bool rightHeld) {
         hitSeg(f.px, f.py, f.px + dx * f.len, f.py + sinf(f.angle) * f.len, 0.45f, 0.0f, 4.0f, &f);
     }
     // piquets entre les couloirs F-R-O-G
-    for (int i = 0; i < 3; i++) hitCircle(81.0f + 32.0f * (float)i, 60.0f, 2.5f, 0.6f, 0.0f);
+    for (int i = 0; i < 3; i++) hitCircle(81.0f + 32.0f * (float)i, 28.0f, 2.5f, 0.6f, 0.0f);
     // bumpers-grenouilles
-    for (int i = 0; i < BUMPER_COUNT; i++) {
+    for (int i = 0; i < bumperCount; i++) {
         if (hitCircle(bumpers[i].x, bumpers[i].y, bumpers[i].r, 0.9f, 380.0f)) {
             bumperFlash[i] = 0.25f;
             bumperHits++;
@@ -250,26 +275,35 @@ void Game::substep(float dt, bool leftHeld, bool rightHeld) {
         }
     }
     // nenuphars : solides ; le premier contact les allume
-    for (int i = 0; i < PAD_COUNT; i++) {
+    const uint8_t allPads = (uint8_t)((1u << padCount) - 1u);
+    for (int i = 0; i < padCount; i++) {
         if (hitCircle(pads[i].x, pads[i].y, pads[i].r, 0.6f, 120.0f)) {
             padFlash[i] = 0.3f;
             if (!((padLit >> i) & 1) && padReset <= 0.0f) {
                 padLit |= (uint8_t)(1u << i);
-                addScore(500);
+                addScore(table == TABLE_POND ? 500 : 300);
                 emit(Sfx::Pad, (uint8_t)i);
-                if (padLit == 0x0F) {
-                    addScore(5000);
+                if (padLit == allPads) {
+                    emit(Sfx::PadsDone);
+                    if (table == TABLE_POND) {
+                        // les 4 nenuphars : la mare est « nettoyee », la bille part vers la table du canard
+                        addScore(5000);
+                        unlock(ACH_PAD_MASTER);
+                        say("LILY PADS! TO THE DUCK", 2.2f);
+                        travel(TABLE_DUCK);
+                        return;
+                    }
+                    // tous les oeufs : le canard est etourdi (double degat) et les oeufs reviennent
+                    addScore(3000);
                     duck.stun = 12.0f;
                     padReset = 0.8f;
-                    unlock(ACH_PAD_MASTER);
-                    emit(Sfx::PadsDone);
-                    say("LILY PADS! DUCK STUNNED", 2.2f);
+                    say("ALL EGGS! DUCK STUNNED", 2.2f);
                 }
             }
         }
     }
-    // canard
-    if (duck.st == DuckState::Patrol) {
+    // canard (table 2 seulement)
+    if (table == TABLE_DUCK && duck.st == DuckState::Patrol) {
         if (hitCircle(duck.x, duck.y, 13.0f, 0.9f, 170.0f) && duck.cool <= 0.0f) {
             duck.cool = 0.3f;
             duck.flash = 0.3f;
@@ -380,13 +414,12 @@ void Game::startNewGame() {
     flies = 0;
     ducksDown = 0;
     bumperHits = 0;
-    padLit = 0; padReset = 0.0f;
-    laneLit = 0;
+    buildTable(TABLE_POND);
+    travelT = 0.0f;
     duck = Duck();
     respawnDelay = 0.0f;
     saveArmed_ = true;
     lastRank = -1;
-    cameraY = MAX_CAM_Y;
     state = State::Playing;
     spawnBall();
     say("PULL THE PLUNGER!", 2.5f);
@@ -455,7 +488,7 @@ void Game::updateDuck(float dt) {
             const float nx = 113.0f + 72.0f * sinf(d.t);
             d.dir = (nx >= d.x) ? 1 : -1;
             d.x = nx;
-            d.y = 108.0f + 5.0f * sinf(d.t * 3.1f);
+            d.y = 70.0f + 5.0f * sinf(d.t * 3.1f);
             break;
         }
         case DuckState::Dying:
@@ -471,9 +504,12 @@ void Game::updateDuck(float dt) {
                 d.hp = d.maxHp;
                 d.t = 0.0f;
                 d.st = DuckState::Patrol;
-                char buf[28];
-                snprintf(buf, sizeof(buf), "DUCK LEVEL %d", d.level);
-                say(buf, 2.0f);
+                if (state == State::Playing) {
+                    char buf[28];
+                    snprintf(buf, sizeof(buf), "BACK TO THE POND");
+                    say(buf, 2.0f);
+                    travel(TABLE_POND);
+                }
             }
             break;
     }
@@ -482,19 +518,25 @@ void Game::updateDuck(float dt) {
 // ----------------------------------------------------------------------------
 // Boucle de jeu
 // ----------------------------------------------------------------------------
-void Game::updateCamera(float dt) {
-    float target = MAX_CAM_Y;
-    if (ball.active && !ball.inShooter) target = clampf(ball.y - (float)VIEW_H * 0.6f, 0.0f, MAX_CAM_Y);
-    cameraY += (target - cameraY) * fminf(1.0f, dt * 6.0f);
-}
 
 void Game::updatePlaying(float dt, const Input& in, bool leftEdge, bool rightEdge, bool nudgeEdge) {
+    if (travelT > 0.0f) {   // ecran de transition (bulles) : le jeu est fige
+        travelT -= dt;
+        if (travelT <= 0.0f) {
+            travelT = 0.0f;
+            buildTable(travelTo);
+            if (travelTo == TABLE_DUCK) { duck.st = DuckState::Patrol; duck.t = 0.0f; }
+            spawnBall();
+            say(travelTo == TABLE_DUCK ? "DUCK TABLE" : "THE POND", 2.0f);
+        }
+        return;
+    }
     if (respawnDelay > 0.0f) {
         respawnDelay -= dt;
         if (respawnDelay <= 0.0f && ballsLeft > 0) spawnBall();
     }
     // lance-bille
-    if (ball.active && ball.inShooter && ball.y > 470.0f) {
+    if (ball.active && ball.inShooter && ball.y > LANE_REST_Y - 20.0f) {
         if (in.plunger) {
             plungerCharge = fminf(1.0f, plungerCharge + dt / 0.9f);
         } else if (plungerCharge > 0.05f) {
@@ -537,8 +579,7 @@ void Game::updatePlaying(float dt, const Input& in, bool leftEdge, bool rightEdg
     }
     spinAngle += spinVel * dt;
     spinVel *= (1.0f - fminf(1.0f, 1.2f * dt));
-    updateDuck(dt);
-    updateCamera(dt);
+    if (table == TABLE_DUCK) updateDuck(dt);
 }
 
 void Game::syncInput(const Input& in) {

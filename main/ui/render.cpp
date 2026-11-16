@@ -22,7 +22,30 @@ namespace render {
 // ---------------------------------------------------------------------------
 static inline int SX(int py) { return py; }
 static inline int SY(int px) { return vid::H - 1 - px; }
-static inline uint16_t C(uint32_t c) { return vid::rgb888(c); }
+// Palette « Game Boy » du jeu d'origine : 3 verts + 2 oranges. Toute couleur demandee est ramenee a la plus proche,
+// et les sprites sont quantifies de la meme facon a l'init : l'ensemble garde un look cohérent.
+static const uint8_t PAL[5][3] = {
+    {6, 63, 50},      // 0 vert tres sombre (contours, murs)
+    {18, 152, 140},   // 1 vert d'eau (ombres, nenuphars)
+    {169, 229, 162},  // 2 vert clair (fond du plateau, textes)
+    {249, 179, 32},   // 3 orange (balle, flippers, cibles actives)
+    {201, 120, 16},   // 4 orange fonce
+};
+static int pal_index(int r, int g, int b) {
+    int best = 0, bd = 1 << 30;
+    for (int i = 0; i < 5; i++) {
+        const int dr = r - PAL[i][0], dg = g - PAL[i][1], db = b - PAL[i][2];
+        const int d = dr * dr * 3 + dg * dg * 4 + db * db * 2;
+        if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+}
+static inline uint16_t PC(int i) { return vid::rgb(PAL[i][0], PAL[i][1], PAL[i][2]); }
+static uint16_t C(uint32_t c) {
+    const int i = pal_index((int)((c >> 16) & 255), (int)((c >> 8) & 255), (int)(c & 255));
+    return PC(i);
+}
+enum { P_DARK = 0, P_TEAL = 1, P_LIGHT = 2, P_ORANGE = 3, P_ORANGE_D = 4 };
 
 static void pfill(int x, int y, int w, int h, uint16_t col) {
     if (w <= 0 || h <= 0) return;
@@ -115,7 +138,7 @@ void init() {
                 if (v == 0xF81F) { a[idx] = 0; px[idx] = 0; continue; }
                 const int r5 = (v >> 11) & 31, g6 = (v >> 5) & 63, b5 = v & 31;
                 a[idx] = 1;
-                px[idx] = vid::rgb((uint8_t)((r5 << 3) | (r5 >> 2)), (uint8_t)((g6 << 2) | (g6 >> 4)), (uint8_t)((b5 << 3) | (b5 >> 2)));
+                px[idx] = PC(pal_index((r5 << 3) | (r5 >> 2), (g6 << 2) | (g6 >> 4), (b5 << 3) | (b5 >> 2)));
             }
         }
         g_hw[k] = {s, px, a};
@@ -159,121 +182,136 @@ static void psprite_c(const spr::Sprite& s, int cx, int cy, bool flip = false, i
 }
 
 // ---------------------------------------------------------------------------
-// Decor
+// Decor : la table tient sur un seul ecran (pas de defilement) ; le bandeau HUD est SOUS la table.
 // ---------------------------------------------------------------------------
-static float g_cam = 0.0f;
-static inline int WY(float wy) { return HUD_H + (int)lroundf(wy - g_cam); }
+static inline int WY(float wy) { return (int)lroundf(wy); }
 static inline int WX(float wx) { return (int)lroundf(wx); }
 
-static void draw_water(const Game& g) {
-    vid::clear(C(0x0A241C));
-    const int cam = (int)lroundf(g_cam);
-    for (int py = HUD_H; py < SCREEN_H; py++) {
-        const int wy = py - HUD_H + cam;
+static void draw_table_bg(const Game& g) {
+    vid::clear(PC(P_DARK));
+    for (int py = 0; py < VIEW_H; py++) {
         int xl = 12, xr = 214;
-        if (wy < 118) {
-            const float dy = 118.0f - (float)wy;
+        if (py < 118) {
+            const float dy = 118.0f - (float)py;
             const float q = 112.0f * 112.0f - dy * dy;
             const float hw = q > 0.0f ? sqrtf(q) : 0.0f;
             xl = (int)lroundf(124.0f - hw); xr = (int)lroundf(124.0f + hw);
         }
-        const uint16_t col = (((wy / 14) & 1) ? C(0x1D7F73) : C(0x238B7B));
-        pfill(xl, py, xr - xl, 1, col);
-        if (wy >= 118 && wy < 520) pfill(214, py, 22, 1, ((wy / 10) & 1) ? C(0x2E3D2B) : C(0x364832));   // couloir de lancement
+        pfill(xl, py, xr - xl, 1, PC(P_LIGHT));
+        if (py >= 118) pfill(214, py, 22, 1, ((py / 6) & 1) ? PC(P_TEAL) : PC(P_DARK));   // couloir de lancement
     }
-    // rides de la mare
-    const uint16_t rip = C(0x5CC2AD);
-    static const int rx[10] = {40, 150, 90, 180, 60, 120, 30, 170, 100, 140};
-    static const int ry[10] = {150, 200, 260, 330, 380, 120, 300, 420, 440, 270};
-    for (int i = 0; i < 10; i++) {
-        const int x = rx[i] + (int)lroundf(3.0f * sinf(g.animT * 0.8f + (float)i));
-        const int y = WY((float)ry[i]);
-        if (y < HUD_H - 6 || y > SCREEN_H) continue;
-        pline(x - 5, y, x + 5, y, rip);
-        pline(x - 3, y + 2, x + 3, y + 2, rip);
+    // l'eau sous les flippers (la bille s'y perd) : bande d'eau avec vagues
+    for (int py = 272; py < VIEW_H; py++) {
+        const int wob = (int)lroundf(2.0f * sinf(g.animT * 2.0f + (float)py * 0.5f));
+        pfill(12, py, 202, 1, ((py - 272) / 5 & 1) ? PC(P_TEAL) : PC(P_LIGHT));
+        for (int k = 0; k < 6; k++) pfill(20 + k * 34 + wob, py, 10, 1, PC(P_TEAL));
     }
+    // dessous des guides : roche sombre
+    ptri(12, 226, 62, 262, 12, VIEW_H, PC(P_DARK));
+    ptri(214, 226, 164, 262, 214, VIEW_H, PC(P_DARK));
+    pfill(12, 262, 50, VIEW_H - 262, PC(P_DARK));
+    pfill(164, 262, 50, VIEW_H - 262, PC(P_DARK));
 }
 
 static void draw_corners(const Game& g) {
-    (void)g;
-    // decor hors table (sous les guides, coins sombres) : roseaux, buche, rocher, lotus
-    psprite(spr::cattail_post, 2, WY(2));
-    psprite(spr::cattail_post, 212, WY(2));
-    psprite(spr::log, 2, WY(460));
-    psprite(spr::cattails, 4, WY(488));
-    psprite(spr::rock, 168, WY(460));
-    psprite(spr::lotus, 172, WY(488));
+    // decor hors table (coins sombres) : roseaux, buche, rocher, lotus
+    psprite(spr::cattail_post, 2, 2);
+    psprite(spr::cattail_post, 212, 2);
+    psprite(spr::cattails, 3, 262);
+    psprite(spr::lotus, 172, 268);
+    if (g.table == TABLE_DUCK) psprite(spr::rock, 22, 275);
 }
 
 static void draw_walls(const Game& g) {
-    const uint16_t dark = C(0x3B2A14), mid = C(0x8A6330), lite = C(0xD9B46E);
+    const uint16_t dark = PC(P_DARK), teal = PC(P_TEAL);
     // slingshots (triangles pleins) : geometrie identique a Game::buildTable()
-    const uint16_t leaf = C(0x3CC24F), leafd = C(0x1E7A38);
-    ptri(WX(36), WY(330), WX(36), WY(376), WX(70), WY(408), leaf);
-    ptri(WX(190), WY(330), WX(190), WY(376), WX(156), WY(408), leaf);
-    pline(WX(36), WY(330), WX(70), WY(408), C(0xB6F07A));
-    pline(WX(190), WY(330), WX(156), WY(408), C(0xB6F07A));
-    pline(WX(36), WY(330), WX(36), WY(376), leafd);  pline(WX(36), WY(376), WX(70), WY(408), leafd);
-    pline(WX(190), WY(330), WX(190), WY(376), leafd); pline(WX(190), WY(376), WX(156), WY(408), leafd);
-    // cadre en bois (les slingshots, kind != 0, sont dessines en triangles ci-dessus)
+    ptri(36, 202, 36, 226, 70, 248, teal);
+    ptri(190, 202, 190, 226, 156, 248, teal);
+    pline(36, 202, 70, 248, dark);  pline(36, 202, 36, 226, dark);  pline(36, 226, 70, 248, dark);
+    pline(190, 202, 156, 248, dark); pline(190, 202, 190, 226, dark); pline(190, 226, 156, 248, dark);
+    pline(37, 204, 68, 247, PC(P_LIGHT));
+    pline(189, 204, 158, 247, PC(P_LIGHT));
+    // cadre (les slingshots, kind != 0, sont dessines ci-dessus)
     for (int i = 0; i < g.wallCount; i++) {
         const Seg& s = g.walls[i];
         if (s.kind) continue;
-        const int x1 = WX(s.x1), y1 = WY(s.y1), x2 = WX(s.x2), y2 = WY(s.y2);
-        if ((y1 < -20 && y2 < -20) || (y1 > SCREEN_H + 20 && y2 > SCREEN_H + 20)) continue;
-        pthick(x1, y1, x2, y2, 3.0f, dark);
+        pthick(WX(s.x1), WY(s.y1), WX(s.x2), WY(s.y2), 3.0f, dark);
     }
     for (int i = 0; i < g.wallCount; i++) {
         const Seg& s = g.walls[i];
         if (s.kind) continue;
-        pthick(WX(s.x1), WY(s.y1), WX(s.x2), WY(s.y2), 1.6f, mid);
-        pline(WX(s.x1), WY(s.y1), WX(s.x2), WY(s.y2), lite);
+        pline(WX(s.x1), WY(s.y1), WX(s.x2), WY(s.y2), teal);
     }
     // piquets entre les couloirs
-    for (int i = 0; i < 3; i++) { pfillcircle(81 + 32 * i, WY(60), 3, dark); pfillcircle(81 + 32 * i, WY(60), 1, lite); }
+    for (int i = 0; i < 3; i++) { pfillcircle(81 + 32 * i, 28, 3, dark); pfillcircle(81 + 32 * i, 28, 1, teal); }
 }
 
 static void draw_lanes(const Game& g) {
     for (int i = 0; i < LANE_COUNT; i++) {
         const int x = WX(g.lanes[i].x), y = WY(g.lanes[i].y);
         const bool lit = (g.laneLit >> i) & 1;
-        pfillcircle(x, y, 8, lit ? C(0xFFE04A) : C(0x14463C));
-        pcircle(x, y, 8, lit ? C(0xFFF6B0) : C(0x0B2A22));
+        pfillcircle(x, y, 8, PC(P_DARK));
+        pfillcircle(x, y, 7, lit ? PC(P_ORANGE) : PC(P_LIGHT));
         const char l[2] = {"FROG"[i], 0};
-        ptext(x - 4, y - 4, l, lit ? C(0x3B2A14) : C(0x7FD0B8));
+        ptext(x - 4, y - 4, l, lit ? PC(P_DARK) : PC(P_TEAL));
     }
 }
 
 static void draw_pads(const Game& g) {
-    for (int i = 0; i < PAD_COUNT; i++) {
+    for (int i = 0; i < g.padCount; i++) {
         const int x = WX(g.pads[i].x), y = WY(g.pads[i].y);
         const bool lit = (g.padLit >> i) & 1;
         const bool flash = g.padFlash[i] > 0.0f;
-        pfillcircle(x, y, 10, C(0x1E7A38));
-        pfillcircle(x, y, 9, flash ? C(0x9BF07A) : C(0x2FA84F));
-        pthick(x, y, x + 9, y - 3, 1.2f, C(0x238B7B));   // l'encoche du nenuphar
-        pline(x - 6, y + 2, x + 3, y + 5, C(0x56C874));
-        if (lit) {   // fleur de lotus
-            for (int k = 0; k < 5; k++) {
-                const float a = (float)k * 1.2566f - 1.5708f;
-                pfillcircle(x + (int)lroundf(cosf(a) * 4.5f), y + (int)lroundf(sinf(a) * 4.5f), 3, C(0xFF8CC8));
+        if (g.table == TABLE_POND) {   // nenuphars : le premier contact allume une fleur orange
+            pfillcircle(x, y, 10, PC(P_DARK));
+            pfillcircle(x, y, 9, flash ? PC(P_LIGHT) : PC(P_TEAL));
+            pthick(x, y, x + 9, y - 3, 1.2f, PC(P_DARK));   // l'encoche du nenuphar
+            if (lit) {
+                for (int k = 0; k < 5; k++) {
+                    const float a = (float)k * 1.2566f - 1.5708f;
+                    pfillcircle(x + (int)lroundf(cosf(a) * 4.5f), y + (int)lroundf(sinf(a) * 4.5f), 3, PC(P_ORANGE));
+                }
+                pfillcircle(x, y, 2, PC(P_DARK));
             }
-            pfillcircle(x, y, 3, C(0xFFE04A));
+        } else {   // oeufs : orange tant qu'ils sont la, un nid vide (anneau) une fois ramasses
+            if (lit) {
+                pcircle(x, y + 2, 7, PC(P_TEAL));
+                pcircle(x, y + 2, 6, PC(P_TEAL));
+            } else {
+                pfillcircle(x, y + 1, 8, PC(P_DARK));
+                pfillcircle(x, y + 1, 7, flash ? PC(P_LIGHT) : PC(P_ORANGE));
+                pfillcircle(x, y - 3, 5, flash ? PC(P_LIGHT) : PC(P_ORANGE));
+                pfill(x - 3, y - 4, 2, 2, PC(P_LIGHT));
+            }
         }
     }
 }
 
 static void draw_bumpers(const Game& g) {
-    for (int i = 0; i < BUMPER_COUNT; i++) {
+    for (int i = 0; i < g.bumperCount; i++) {
         const int x = WX(g.bumpers[i].x), y = WY(g.bumpers[i].y);
         const bool flash = g.bumperFlash[i] > 0.0f;
-        if (i == 2) {
-            if (flash) psprite_c(spr::boom, x, y);
-            psprite_c(spr::bumper_mushroom, x, y);
-        } else {
-            psprite_c(flash ? spr::bumper_mouth : spr::bumper_stack, x, y);
-        }
+        pfillcircle(x, y, 15, PC(P_DARK));
+        pfillcircle(x, y, 13, flash ? PC(P_ORANGE) : PC(P_TEAL));
+        pfillcircle(x, y, 8, PC(P_DARK));
+        pfillcircle(x, y, 6, flash ? PC(P_LIGHT) : PC(P_TEAL));
+        pfillcircle(x, y, 2, PC(P_DARK));
     }
+}
+
+static void draw_pond_decor(const Game& g) {
+    // la grenouille centrale (entouree des nenuphars) et les cibles en losange comme dans l'original
+    const int cx = 114, cy = 176;
+    psprite_c(spr::frog_sit, cx, cy + 4, false, 1);
+    for (int k = 0; k < 6; k++) {
+        const float a = (float)k * 1.0472f + 0.5236f;
+        const int x = cx + (int)lroundf(cosf(a) * 28.0f), y = cy + (int)lroundf(sinf(a) * 16.0f);
+        pfill(x - 2, y - 2, 5, 5, PC(P_TEAL));
+        pfill(x - 1, y - 1, 3, 3, PC(P_LIGHT));
+    }
+    // touches A / S, comme sur le vrai ecran
+    (void)g;
+    ptext(96, 226, "A", PC(P_DARK)); ptext(136, 226, "S", PC(P_DARK));
 }
 
 static void draw_spinner(const Game& g) {
@@ -287,7 +325,7 @@ static void draw_spinner(const Game& g) {
 
 static void draw_duck(const Game& g) {
     const Duck& d = g.duck;
-    if (d.st == DuckState::Away) return;
+    if (g.table != TABLE_DUCK || d.st == DuckState::Away) return;
     int cx = WX(d.x), cy = WY(d.y);
     const bool white = d.flash > 0.0f;
     if (d.st == DuckState::Dying) {
@@ -297,22 +335,24 @@ static void draw_duck(const Game& g) {
         if (t < 0.4f) psprite_c(spr::boom, cx, cy);
     }
     const int dr = d.dir;
-    const uint16_t body = white ? C(0xFFFFFF) : C(0xFFD83A);
-    const uint16_t wing = white ? C(0xDDDDDD) : C(0xE0B020);
-    const uint16_t beak = white ? C(0xFFFFFF) : C(0xFF8A1F);
+    const uint16_t body = white ? PC(P_LIGHT) : PC(P_ORANGE);
+    const uint16_t wing = white ? PC(P_LIGHT) : PC(P_ORANGE_D);
+    const uint16_t beak = white ? PC(P_LIGHT) : PC(P_ORANGE_D);
+    pfillcircle(cx, cy, 12, PC(P_DARK));
     pfillcircle(cx, cy, 11, body);
     ptri(cx - dr * 9, cy - 2, cx - dr * 17, cy - 8, cx - dr * 10, cy + 5, body);   // queue
     pfillcircle(cx - dr * 2, cy + 2, 5, wing);
     const int hx = cx + dr * 8, hy = cy - 9;
+    pfillcircle(hx, hy, 7, PC(P_DARK));
     pfillcircle(hx, hy, 6, body);
     ptri(hx + dr * 5, hy - 1, hx + dr * 13, hy + 1, hx + dr * 5, hy + 4, beak);
-    pfillcircle(hx + dr * 1, hy - 2, 1, C(0x101010));
+    pfillcircle(hx + dr * 1, hy - 2, 1, PC(P_DARK));
     if (d.st == DuckState::Patrol) {
         // barre de vie
         const int bw = 30;
-        pfill(cx - bw / 2 - 1, cy - 25, bw + 2, 5, C(0x101010));
+        pfill(cx - bw / 2 - 1, cy - 25, bw + 2, 5, PC(P_DARK));
         const int fw = d.maxHp > 0 ? (bw * (d.hp > 0 ? d.hp : 0)) / d.maxHp : 0;
-        pfill(cx - bw / 2, cy - 24, fw, 3, d.stun > 0.0f ? C(0xFFE04A) : C(0xE0453A));
+        pfill(cx - bw / 2, cy - 24, fw, 3, d.stun > 0.0f ? PC(P_LIGHT) : PC(P_ORANGE));
         if (d.stun > 0.0f) {   // etoiles d'etourdissement
             for (int k = 0; k < 3; k++) {
                 const float a = g.animT * 5.0f + (float)k * 2.0944f;
@@ -324,21 +364,19 @@ static void draw_duck(const Game& g) {
 
 static void draw_plunger(const Game& g) {
     const int x = WX(LANE_X);
-    const int base = WY(516.0f);
+    const int base = 295;
     const float push = (g.ball.active && g.ball.inShooter) ? g.plungerCharge * 12.0f : 0.0f;
     const int head = WY(LANE_REST_Y + 6.0f + push);
-    pfill(x - 10, base, 20, 4, C(0x707070));
-    // ressort en zigzag
     int py = base;
     int sgn = 1;
     while (py > head + 3) {
-        const int ny = py - 4;
-        pline(x - 5 * sgn, py, x + 5 * sgn, ny, C(0xC8C8C8));
+        const int ny = py - 3;
+        pline(x - 5 * sgn, py, x + 5 * sgn, ny, PC(P_LIGHT));
         sgn = -sgn;
         py = ny;
     }
-    pfill(x - 8, head, 16, 4, C(0xD8D8D8));
-    pfill(x - 8, head + 3, 16, 1, C(0x707070));
+    pfill(x - 8, head, 16, 3, PC(P_ORANGE));
+    pfill(x - 8, head + 3, 16, 1, PC(P_DARK));
 }
 
 static void draw_flippers(const Game& g) {
@@ -347,10 +385,10 @@ static void draw_flippers(const Game& g) {
         const float dx = f.isLeft ? cosf(f.angle) : -cosf(f.angle);
         const int x0 = WX(f.px), y0 = WY(f.py);
         const int x1 = WX(f.px + dx * f.len), y1 = WY(f.py + sinf(f.angle) * f.len);
-        ptaper(x0, y0, x1, y1, 6.5f, 4.0f, C(0x1E5A2A));
-        ptaper(x0, y0, x1, y1, 5.0f, 2.6f, C(0xF6EEC4));
-        pfillcircle(x0, y0, 3, C(0x9AA0A6));
-        pfillcircle(x0, y0, 1, C(0xE8E8E8));
+        ptaper(x0, y0, x1, y1, 6.5f, 4.0f, PC(P_DARK));
+        ptaper(x0, y0, x1, y1, 5.0f, 2.6f, PC(P_ORANGE));
+        pfillcircle(x0, y0, 3, PC(P_DARK));
+        pfillcircle(x0, y0, 1, PC(P_LIGHT));
     }
 }
 
@@ -362,15 +400,37 @@ static void draw_ball(const Game& g) {
     const int x = WX(b.x), y = WY(by);
     if (g.ballSaveTimer > 0.0f) {   // aura de protection : clignote de plus en plus vite
         const bool on = g.ballSaveTimer > 3.0f || (((int)(g.animT * 8.0f)) & 1);
-        if (on) pcircle(x, y, 8, C(0x7FF0FF));
+        if (on) pcircle(x, y, 8, PC(P_TEAL));
     }
-    psprite_c(spr::ball, x, y);
+    pfillcircle(x, y, 6, PC(P_DARK));
+    pfillcircle(x, y, 5, PC(P_ORANGE));
+    pfill(x - 2, y - 2, 2, 2, PC(P_LIGHT));
+}
+
+// Ecran de transition entre deux tables : on plonge dans l'eau (bulles qui montent), comme dans l'original.
+static void draw_travel(const Game& g) {
+    vid::clear(PC(P_TEAL));
+    for (int i = 0; i < 18; i++) {
+        const float sp = 30.0f + (float)((i * 37) % 50);
+        const int x = 14 + (i * 53) % 212;
+        const int y = SCREEN_H - (int)fmodf(g.animT * sp + (float)(i * 71), (float)SCREEN_H + 20.0f);
+        const int r = 3 + (i % 4) * 2;
+        pcircle(x, y, r, PC(P_LIGHT));
+        pfill(x - r / 2, y - r / 2, 2, 2, PC(P_LIGHT));
+    }
+    // vagues en haut
+    for (int x = 0; x < SCREEN_W; x += 8)
+        pfillcircle(x + 4, 4 + (int)lroundf(2.0f * sinf(g.animT * 4.0f + (float)x * 0.2f)), 6, PC(P_LIGHT));
+    const char* t = (g.travelTo == TABLE_DUCK) ? "DUCK TABLE" : "THE POND";
+    pfill(40, 140, 160, 30, PC(P_DARK));
+    ptext_center(SCREEN_W / 2, 150, t, PC(P_ORANGE), 2);
 }
 
 static void draw_world(const Game& g) {
-    g_cam = g.cameraY;
-    draw_water(g);
+    if (g.travelT > 0.0f) { draw_travel(g); return; }
+    draw_table_bg(g);
     draw_corners(g);
+    if (g.table == TABLE_POND) draw_pond_decor(g);
     draw_walls(g);
     draw_lanes(g);
     draw_pads(g);
@@ -383,51 +443,42 @@ static void draw_world(const Game& g) {
 }
 
 // ---------------------------------------------------------------------------
-// HUD et bandeaux
+// HUD (SOUS la table, comme dans l'original) et bandeaux
 // ---------------------------------------------------------------------------
 static void draw_hud(const Game& g) {
-    pfill(0, 0, SCREEN_W, HUD_H, C(0x07261D));
-    pfill(0, HUD_H - 2, SCREEN_W, 2, C(0x3CC24F));
+    const int y0 = VIEW_H;
+    pfill(0, y0, SCREEN_W, HUD_H, PC(P_TEAL));
+    pfill(0, y0, SCREEN_W, 2, PC(P_DARK));
     char buf[32];
     snprintf(buf, sizeof(buf), "%u", (unsigned)g.score);
-    ptext_sh(6, 4, buf, C(0xFFF6B0), C(0x000000), 2);
-    // billes restantes
-    for (int i = 0; i < g.ballsLeft; i++) psprite(spr::frog_heart, 6 + i * 18, 22);
-    // mouches
-    psprite(spr::fly, 66, 22);
-    snprintf(buf, sizeof(buf), "%d", g.flies);
-    ptext(84, 26, buf, C(0xE8FFD0));
-    // multiplicateur
-    psprite(spr::bell, 120, 21);
-    snprintf(buf, sizeof(buf), "x%d", g.multiplier);
-    ptext_sh(140, 24, buf, C(0xFFE04A), C(0x000000), 1);
-    // niveau du canard et protection de bille
-    snprintf(buf, sizeof(buf), "DUCK L%d", g.duck.level);
-    ptext(172, 6, buf, C(0xFFD83A));
-    if (g.ballSaveTimer > 0.0f) {
-        const int w = (int)lroundf(60.0f * g.ballSaveTimer / BALL_SAVE_SEC);
-        pfill(172, 26, 62, 6, C(0x101010));
-        pfill(173, 27, w, 4, C(0x7FF0FF));
+    ptext_sh(6, y0 + 7, buf, PC(P_ORANGE), PC(P_DARK), 1);
+    snprintf(buf, sizeof(buf), "X%d", g.multiplier);
+    ptext_center_sh(SCREEN_W / 2 + 2, y0 + 7, buf, PC(P_ORANGE), PC(P_DARK), 1);
+    snprintf(buf, sizeof(buf), "BALL %d", g.ballsLeft);
+    ptext_sh(SCREEN_W - 6 - text_w(buf), y0 + 7, buf, PC(P_ORANGE), PC(P_DARK), 1);
+    if (g.ballSaveTimer > 0.0f) {   // protection de bille : fine barre au-dessus du bandeau
+        const int w = (int)lroundf((float)(SCREEN_W - 4) * g.ballSaveTimer / BALL_SAVE_SEC);
+        pfill(2, y0 + 3, w, 2, PC(P_LIGHT));
     }
 }
 
 static void draw_banner(const Game& g) {
-    if (g.bannerTimer > 0.0f && g.banner[0]) {
-        const int y = HUD_H + 34;
+    if (g.bannerTimer > 0.0f && g.banner[0] && g.travelT <= 0.0f) {
+        const int y = 62;
         const int w = text_w(g.banner) + 12;
-        pfill(SCREEN_W / 2 - w / 2, y - 5, w, 18, C(0x07261D));
-        pfill(SCREEN_W / 2 - w / 2, y - 5, w, 1, C(0xFFE04A));
-        pfill(SCREEN_W / 2 - w / 2, y + 12, w, 1, C(0xFFE04A));
-        ptext_center(SCREEN_W / 2, y, g.banner, C(0xFFF6B0));
+        pfill(SCREEN_W / 2 - w / 2, y - 5, w, 18, PC(P_DARK));
+        pfill(SCREEN_W / 2 - w / 2, y - 5, w, 1, PC(P_ORANGE));
+        pfill(SCREEN_W / 2 - w / 2, y + 12, w, 1, PC(P_ORANGE));
+        ptext_center(SCREEN_W / 2, y, g.banner, PC(P_LIGHT));
     }
     if (g.achTimer > 0.0f && g.achPopup >= 0) {
-        const int y = SCREEN_H - 40;
-        pfill(10, y, 220, 30, C(0x07261D));
-        pfill(10, y, 220, 1, C(0xFFE04A));
-        pfill(10, y + 29, 220, 1, C(0xFFE04A));
+        const int y = 2;   // en haut de la table : ne cache ni les flippers ni la bille
+        pfill(10, y, 220, 30, PC(P_DARK));
+        pfill(10, y, 220, 1, PC(P_ORANGE));
+        pfill(10, y + 29, 220, 1, PC(P_ORANGE));
         psprite(spr::star, 16, y + 6);
-        ptext(40, y + 5, "TROPHY UNLOCKED", C(0xE8FFD0));
-        ptext(40, y + 17, ach_name(g.achPopup), C(0xFFE04A));
+        ptext(40, y + 5, "TROPHY UNLOCKED", PC(P_LIGHT));
+        ptext(40, y + 17, ach_name(g.achPopup), PC(P_ORANGE));
     }
 }
 
@@ -533,7 +584,7 @@ void draw(const Game& g) {
             draw_world(g);
             draw_hud(g);
             draw_banner(g);
-            if (g.tilted && g.state == State::Playing) ptext_center_sh(SCREEN_W / 2, HUD_H + 70, "TILT", C(0xFF5050), C(0x000000), 3);
+            if (g.tilted && g.state == State::Playing) ptext_center_sh(SCREEN_W / 2, 70, "TILT", C(0xFF5050), C(0x000000), 3);
             if (g.state == State::GameOver) draw_gameover(g);
             break;
     }
