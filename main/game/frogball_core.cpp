@@ -599,11 +599,18 @@ void Game::update(float dt, const Input& in, uint32_t now) {
 
     switch (state) {
         case State::Title:
-            if (le || re) { menuSel ^= 1; emit(Sfx::MenuMove); }
+            if (le) { menuSel = (menuSel + 2) % 3; emit(Sfx::MenuMove); }
+            if (re) { menuSel = (menuSel + 1) % 3; emit(Sfx::MenuMove); }
             if (pe || ne) {
                 emit(Sfx::MenuOk);
-                if (menuSel == 0) startNewGame(); else state = State::Trophies;
+                if (menuSel == 0) startNewGame();
+                else if (menuSel == 1) state = State::Options;
+                else state = State::Trophies;
             }
+            break;
+        case State::Options:
+            if (le || re) { save.style = (save.style == STYLE_COLOR) ? STYLE_GAMEBOY : STYLE_COLOR; emit(Sfx::MenuMove); persist(); }
+            if (pe || ne) { emit(Sfx::MenuOk); state = State::Title; }
             break;
         case State::Trophies:
             if (pe || ne) { emit(Sfx::MenuOk); state = State::Title; }

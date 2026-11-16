@@ -6,7 +6,8 @@ les sons sont originaux.
 
 **Tourner la console de 90° vers la droite** (comme AKA Pinball) : chaque table tient sur UN SEUL écran
 (portrait 240×296, sans défilement), le bandeau score / multiplicateur / bille est sous la table, et le rendu
-reprend la palette « Game Boy » (3 verts + orange) observée dans la vidéo de référence.
+propose deux **styles d'affichage au choix** (menu OPTIONS, sauvegardé) : « Game Boy » (3 verts + orange, comme dans
+la vidéo de référence) ou « Full color » (couleurs franches et contrastées).
 
 ## Le jeu
 - **Deux tables reliées** : la **mare** (3 bumpers, grenouille centrale, 4 nénuphars, spinner « mouches »)

@@ -22,26 +22,40 @@ namespace render {
 // ---------------------------------------------------------------------------
 static inline int SX(int py) { return py; }
 static inline int SY(int px) { return vid::H - 1 - px; }
-// Palette « Game Boy » du jeu d'origine : 3 verts + 2 oranges. Toute couleur demandee est ramenee a la plus proche,
-// et les sprites sont quantifies de la meme facon a l'init : l'ensemble garde un look cohérent.
-static const uint8_t PAL[5][3] = {
+// Deux styles au choix (option du menu) :
+//  - GAME BOY : palette du jeu d'origine, 3 verts + 2 oranges. Toute couleur demandee est ramenee a la plus proche,
+//    et les sprites sont quantifies de la meme facon : l'ensemble garde un look coherent.
+//  - COULEUR : memes roles, mais en couleurs franches et contrastees ; les couleurs d'origine sont conservees.
+static const uint8_t PAL_GB[5][3] = {
     {6, 63, 50},      // 0 vert tres sombre (contours, murs)
     {18, 152, 140},   // 1 vert d'eau (ombres, nenuphars)
     {169, 229, 162},  // 2 vert clair (fond du plateau, textes)
     {249, 179, 32},   // 3 orange (balle, flippers, cibles actives)
     {201, 120, 16},   // 4 orange fonce
 };
+static const uint8_t PAL_COL[5][3] = {
+    {12, 22, 52},     // 0 bleu nuit (contours, murs)
+    {22, 120, 214},   // 1 bleu eau / nenuphars
+    {196, 244, 150},  // 2 vert clair vif (fond du plateau, textes)
+    {255, 214, 20},   // 3 jaune dore (balle, flippers, cibles actives)
+    {230, 70, 40},    // 4 rouge-orange (canard, becs, details chauds)
+};
+static int g_style = STYLE_GAMEBOY;
 static int pal_index(int r, int g, int b) {
     int best = 0, bd = 1 << 30;
     for (int i = 0; i < 5; i++) {
-        const int dr = r - PAL[i][0], dg = g - PAL[i][1], db = b - PAL[i][2];
+        const int dr = r - PAL_GB[i][0], dg = g - PAL_GB[i][1], db = b - PAL_GB[i][2];
         const int d = dr * dr * 3 + dg * dg * 4 + db * db * 2;
         if (d < bd) { bd = d; best = i; }
     }
     return best;
 }
-static inline uint16_t PC(int i) { return vid::rgb(PAL[i][0], PAL[i][1], PAL[i][2]); }
+static inline uint16_t PC(int i) {
+    const uint8_t* p = (g_style == STYLE_COLOR) ? PAL_COL[i] : PAL_GB[i];
+    return vid::rgb(p[0], p[1], p[2]);
+}
 static uint16_t C(uint32_t c) {
+    if (g_style == STYLE_COLOR) return vid::rgb888(c);
     const int i = pal_index((int)((c >> 16) & 255), (int)((c >> 8) & 255), (int)(c & 255));
     return PC(i);
 }
@@ -117,7 +131,7 @@ static void ptext_center_sh(int cx, int y, const char* str, uint16_t col, uint16
 // Sprites : RGB565 standard -> format materiel, transposes (colonne par colonne)
 // ---------------------------------------------------------------------------
 constexpr int POOL = 20480;
-struct HW { const spr::Sprite* s; uint16_t* px; uint8_t* a; };
+struct HW { const spr::Sprite* s; uint16_t* px; uint8_t* a; };   // a : index de palette Game Boy, 255 = transparent
 static HW g_hw[spr::COUNT];
 static uint16_t g_pool[POOL];
 static uint8_t g_apool[POOL];
@@ -135,10 +149,11 @@ void init() {
             for (int j = 0; j < h; j++) {
                 const uint16_t v = s->px[j * w + i];
                 const int idx = i * h + j;
-                if (v == 0xF81F) { a[idx] = 0; px[idx] = 0; continue; }
+                if (v == 0xF81F) { a[idx] = 255; px[idx] = 0; continue; }
                 const int r5 = (v >> 11) & 31, g6 = (v >> 5) & 63, b5 = v & 31;
-                a[idx] = 1;
-                px[idx] = PC(pal_index((r5 << 3) | (r5 >> 2), (g6 << 2) | (g6 >> 4), (b5 << 3) | (b5 >> 2)));
+                const int R = (r5 << 3) | (r5 >> 2), G = (g6 << 2) | (g6 >> 4), B = (b5 << 3) | (b5 >> 2);
+                a[idx] = (uint8_t)pal_index(R, G, B);
+                px[idx] = vid::rgb((uint8_t)R, (uint8_t)G, (uint8_t)B);   // couleur d'origine (style COULEUR)
             }
         }
         g_hw[k] = {s, px, a};
@@ -161,18 +176,24 @@ static void psprite(const spr::Sprite& s, int x0, int y0, bool flip = false, int
         const int col = flip ? (w - 1 - i / scale) : (i / scale);
         const uint16_t* px = hw->px + col * h;
         const uint8_t* a = hw->a + col * h;
+        const bool gb = (g_style != STYLE_COLOR);
         int j = 0;
         while (j < h) {
-            if (!a[j]) { j++; continue; }
+            if (a[j] == 255) { j++; continue; }
             const int j0 = j;
-            while (j < h && a[j]) j++;
+            while (j < h && a[j] != 255) j++;
             if (scale == 1) {
                 int xs = SX(y0 + j0), n = j - j0, skip = 0;
                 if (xs < 0) { skip = -xs; xs = 0; n -= skip; }
                 if (xs + n > vid::W) n = vid::W - xs;
-                if (n > 0) vid::raw_blit_row(xs, sy, px + j0 + skip, n);
+                if (n <= 0) continue;
+                if (!gb) { vid::raw_blit_row(xs, sy, px + j0 + skip, n); continue; }
+                uint16_t tmp[64];
+                if (n > 64) n = 64;   // les sprites font au plus 64 px de haut
+                for (int q = 0; q < n; q++) tmp[q] = PC(a[j0 + skip + q]);
+                vid::raw_blit_row(xs, sy, tmp, n);
             } else {
-                for (int q = j0; q < j; q++) vid::fill_rect(SX(y0 + q * scale), sy, scale, 1, px[q]);
+                for (int q = j0; q < j; q++) vid::fill_rect(SX(y0 + q * scale), sy, scale, 1, gb ? PC(a[q]) : px[q]);
             }
         }
     }
@@ -503,9 +524,9 @@ static void draw_title(const Game& g) {
     const int bob = (int)lroundf(3.0f * sinf(g.animT * 3.0f));
     psprite(spr::frog_stand, SCREEN_W / 2 - 46, 76 + bob, false, 2);
     psprite(spr::fly, 40 + (int)lroundf(20.0f * sinf(g.animT * 2.0f)), 90 + (int)lroundf(10.0f * cosf(g.animT * 3.0f)));
-    const char* items[2] = {"PLAY", "TROPHIES"};
-    for (int i = 0; i < 2; i++) {
-        const int y = 196 + i * 24;
+    const char* items[3] = {"PLAY", "OPTIONS", "TROPHIES"};
+    for (int i = 0; i < 3; i++) {
+        const int y = 174 + i * 22;
         const bool sel = (g.menuSel == i);
         if (sel) {
             pfill(50, y - 4, 140, 20, C(0x07261D));
@@ -523,6 +544,30 @@ static void draw_title(const Game& g) {
     snprintf(buf, sizeof(buf), "TROPHIES %d/%d", got, (int)ACH_COUNT);
     ptext_center_sh(SCREEN_W / 2, 264, buf, C(0xE8FFD0), C(0x0B2A22));
     ptext_center_sh(SCREEN_W / 2, 296, "L/R: MOVE  B/R1: OK", C(0xB6F07A), C(0x0B2A22));
+}
+
+static void draw_options(const Game& g) {
+    draw_menu_bg(g);
+    ptext_center_sh(SCREEN_W / 2, 20, "OPTIONS", C(0xFFE04A), C(0x0B2A22), 2);
+    ptext_center_sh(SCREEN_W / 2, 70, "STYLE", C(0xE8FFD0), C(0x0B2A22), 1);
+    const bool col = (g.save.style == STYLE_COLOR);
+    pfill(24, 88, 192, 26, PC(P_DARK));
+    pfill(24, 88, 192, 1, PC(P_ORANGE));
+    pfill(24, 113, 192, 1, PC(P_ORANGE));
+    ptext(32, 97, "<", PC(P_ORANGE));
+    ptext(200, 97, ">", PC(P_ORANGE));
+    ptext_center(SCREEN_W / 2, 97, col ? "FULL COLOR" : "GAME BOY", PC(P_LIGHT));
+    // apercu des deux palettes (celle en cours est entouree)
+    for (int st = 0; st < 2; st++) {
+        const int y = 140 + st * 44;
+        const uint8_t (*pal)[3] = st ? PAL_COL : PAL_GB;
+        ptext_center_sh(SCREEN_W / 2, y, st ? "FULL COLOR" : "GAME BOY", PC(P_LIGHT), PC(P_DARK), 1);
+        if ((st == 1) == col) pfill(36, y + 12, 168, 26, PC(P_ORANGE));
+        pfill(38, y + 14, 164, 22, PC(P_DARK));
+        for (int i = 0; i < 5; i++) pfill(42 + i * 31, y + 17, 28, 16, vid::rgb(pal[i][0], pal[i][1], pal[i][2]));
+    }
+    ptext_center_sh(SCREEN_W / 2, 270, "L/R: CHANGE", PC(P_LIGHT), PC(P_DARK));
+    ptext_center_sh(SCREEN_W / 2, 284, "B/R1: BACK", PC(P_LIGHT), PC(P_DARK));
 }
 
 static void draw_trophies(const Game& g) {
@@ -575,7 +620,9 @@ static void draw_nameentry(const Game& g) {
 }
 
 void draw(const Game& g) {
+    g_style = (g.save.style == STYLE_COLOR) ? STYLE_COLOR : STYLE_GAMEBOY;
     switch (g.state) {
+        case State::Options:   draw_options(g); break;
         case State::Title:     draw_title(g); break;
         case State::Trophies:  draw_trophies(g); break;
         case State::NameEntry: draw_nameentry(g); break;

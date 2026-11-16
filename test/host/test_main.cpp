@@ -56,14 +56,28 @@ int main(int argc, char** argv) {
     shot("01_title", g);
     CHECK(vid::count_non_background(0) > 40000, "le titre doit remplir l'ecran");
     press(g, &Input::right);
-    CHECK(g.menuSel == 1, "droite -> TROPHEES");
-    shot("02_title_trophies_sel", g);
+    CHECK(g.menuSel == 1, "droite -> OPTIONS");
+    shot("02_title_options_sel", g);
+    press(g, &Input::plunger);
+    CHECK(g.state == State::Options, "entree dans les options");
+    shot("02b_options_gameboy", g);
+    CHECK(g.save.style == STYLE_GAMEBOY, "style par defaut : Game Boy");
+    press(g, &Input::right);
+    CHECK(g.save.style == STYLE_COLOR && g_saves > 0, "style COULEUR choisi et sauvegarde");
+    shot("02c_options_color", g);
+    press(g, &Input::left);
+    CHECK(g.save.style == STYLE_GAMEBOY, "retour au style Game Boy");
+    press(g, &Input::nudge);
+    CHECK(g.state == State::Title, "retour au titre depuis les options");
+    press(g, &Input::right);
+    CHECK(g.menuSel == 2, "droite -> TROPHEES");
     press(g, &Input::plunger);
     CHECK(g.state == State::Trophies, "entree dans les trophees");
     shot("03_trophies", g);
     press(g, &Input::nudge);
     CHECK(g.state == State::Title, "retour au titre");
-    press(g, &Input::left);
+    press(g, &Input::right);   // 2 -> 0 (le menu boucle)
+    CHECK(g.menuSel == 0, "le menu boucle sur JOUER");
     press(g, &Input::plunger);
     CHECK(g.state == State::Playing, "JOUER lance la partie");
     shot("04_start", g);
@@ -110,6 +124,7 @@ int main(int argc, char** argv) {
     press(k, &Input::plunger);
     CHECK(k.table == TABLE_POND && k.bumperCount == 3 && k.padCount == 4, "la partie commence sur la mare");
     shot("08_pond", k);
+    k.save.style = STYLE_COLOR; shot("08b_pond_color", k); k.save.style = STYLE_GAMEBOY;
     k.unlock(ACH_DUCK_DOWN);
     CHECK(k.hasAch(ACH_DUCK_DOWN) && k.achPopup == ACH_DUCK_DOWN, "succes debloque");
     // les 4 nenuphars de la mare -> ecran de transition -> table du canard

@@ -112,7 +112,10 @@ struct Input {
     bool nudge   = false;     // secousse (+ valider / retour)
 };
 
-enum class State : uint8_t { Title, Playing, GameOver, NameEntry, Trophies };
+enum class State : uint8_t { Title, Playing, GameOver, NameEntry, Trophies, Options };
+
+constexpr int STYLE_GAMEBOY = 0;   // palette « Game Boy » (3 verts + orange)
+constexpr int STYLE_COLOR   = 1;   // pleines couleurs contrastees
 
 enum class Sfx : uint8_t {
     None = 0,
@@ -127,6 +130,7 @@ struct ScoreEntry { uint32_t score; char tri[4]; };
 struct SaveData {
     uint16_t   ach = 0;
     ScoreEntry top[TOP_N];
+    uint8_t    style = STYLE_GAMEBOY;   // option d'affichage
 };
 struct SaveStore {
     void (*load)(SaveData& out) = nullptr;
@@ -144,7 +148,7 @@ public:
 
     // --- Etat lisible par le rendu et les tests -----------------------------------
     State state = State::Title;
-    int   menuSel = 0;                 // 0 JOUER, 1 TROPHEES
+    int   menuSel = 0;                 // 0 JOUER, 1 OPTIONS, 2 TROPHEES
 
     Ball    ball;
     Flipper fl[2];
